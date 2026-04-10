@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>木材庫存系統</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ["'Barlow Condensed'", "sans-serif"],
+          body:    ["'Barlow'", "sans-serif"],
+        },
+        colors: {
+          forest:  { 900:"#0e1c0f", 800:"#1a3318", 700:"#244d22", 600:"#2f6629", 500:"#3a8031", 400:"#52a847", 300:"#79c46a", 200:"#b0dda5", 100:"#dff2da" },
+          bark:    { 900:"#1c1208", 800:"#3a2a10", 700:"#57421c", 600:"#7a5e2a", 500:"#9e7b38", 400:"#c09d55", 300:"#d6ba80", 200:"#ecdbb6", 100:"#f7f0e3" },
+          amber:   "#f0a500",
+          danger:  "#e05252",
+          ink:     "#1a1a1a",
+        }
+      }
+    }
+  }
+</script>
+
+<style>
+  * { -webkit-tap-highlight-color: transparent; }
+  body { font-family: 'Barlow', 'Noto Sans TC', sans-serif; background: #0e1c0f; min-height: 100vh; }
+
+  .grain::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+    pointer-events: none; border-radius: inherit;
+  }
+
+  .card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; }
+
+  .field {
+    background: rgba(0,0,0,0.35);
+    border: 1.5px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    color: #f7f0e3;
+    font-family: 'Barlow', 'Noto Sans TC', sans-serif;
+    font-size: 18px;
+    padding: 14px 18px;
+    width: 100%;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+  .field:focus { outline: none; border-color: #52a847; }
+  .field::placeholder { color: rgba(255,255,255,0.3); }
+  .field option { background: #1a3318; color: #f7f0e3; }
+  label.fieldlabel { font-size: 13px; font-weight: 600; letter-spacing: 0.05em; color: #79c46a; display: block; margin-bottom: 6px; }
+
+  .btn {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700; font-size: 18px; letter-spacing: 0.06em;
+    border-radius: 12px; padding: 16px 28px;
+    cursor: pointer; transition: all 0.15s;
+    display: inline-flex; align-items: center; gap: 10px;
+    border: none; outline: none;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary   { background: #3a8031; color: #f7f0e3; }
+  .btn-primary:hover { background: #52a847; }
+  .btn-secondary { background: rgba(255,255,255,0.08); color: #dff2da; border: 1px solid rgba(255,255,255,0.15); }
+  .btn-secondary:hover { background: rgba(255,255,255,0.14); }
+  .btn-amber     { background: #f0a500; color: #1a1a1a; }
+  .btn-amber:hover { background: #ffc029; }
+  .btn-danger    { background: #e05252; color: white; }
+  .btn-danger:hover { background: #f06b6b; }
+  .btn-camera    { background: #244d22; color: #79c46a; border: 2px dashed #3a8031; width: 100%; padding: 36px 20px; flex-direction: column; gap: 8px; font-size: 16px; border-radius: 16px; }
+  .btn-camera:hover { background: #2f6629; border-color: #52a847; }
+  .btn:disabled  { opacity: 0.45; cursor: not-allowed; transform: none !important; }
+
+  .badge { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.07em; padding: 4px 12px; border-radius: 99px; display: inline-flex; align-items: center; gap: 6px; }
+  .badge-online  { background: rgba(82,168,71,0.2); color: #79c46a; border: 1px solid #3a8031; }
+  .badge-offline { background: rgba(224,82,82,0.2); color: #f09090; border: 1px solid #e05252; }
+
+  #camera-preview-wrap { display: none; position: relative; border-radius: 16px; overflow: hidden; }
+  #camera-preview-wrap.active { display: block; }
+  #photo-thumb { display: none; width: 100%; border-radius: 14px; object-fit: cover; max-height: 260px; border: 2px solid #3a8031; }
+  #photo-thumb.show { display: block; }
+  video#camera-video { width: 100%; border-radius: 14px; max-height: 260px; object-fit: cover; background: #000; }
+
+  .queue-badge { background: #f0a500; color: #1a1a1a; border-radius: 99px; font-size: 13px; font-weight: 700; padding: 2px 9px; }
+
+  #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(80px); background: #1a3318; border: 1px solid #3a8031; color: #dff2da; font-size: 16px; padding: 14px 28px; border-radius: 12px; z-index: 9999; transition: transform 0.3s ease; white-space: nowrap; pointer-events: none; }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast.error { background: #3a1010; border-color: #e05252; color: #f09090; }
+
+  .spinner { width: 20px; height: 20px; border: 2.5px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .history-row { background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; }
+  .history-row.pending { border-color: rgba(240,165,0,0.4); background: rgba(240,165,0,0.06); }
+</style>
+</head>
+
+<body class="text-bark-100">
+
+<!-- 頁首 -->
+<header class="relative grain bg-forest-800 border-b border-forest-700 px-5 pt-6 pb-5">
+  <div class="max-w-2xl mx-auto flex items-center justify-between">
+    <div>
+      <div class="font-display font-700 text-3xl text-bark-100 tracking-wide leading-none">🌲 木材記錄</div>
+      <div class="text-forest-300 text-sm mt-1 tracking-widest uppercase">庫存管理系統</div>
+    </div>
+    <div class="flex flex-col items-end gap-2">
+      <span id="status-badge" class="badge badge-offline">
+        <span id="status-dot" class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+        <span id="status-text">離線</span>
+      </span>
+      <button class="btn btn-amber py-2.5 px-4 text-sm" id="sync-btn" onclick="syncOfflineRecords()">
+        ↑ 同步 <span class="queue-badge" id="queue-count" style="display:none">0</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- 主要內容 -->
+<main class="max-w-2xl mx-auto px-4 py-6 space-y-5">
+
+  <!-- GAS 網址設定 -->
+  <div class="card p-5">
+    <label class="fieldlabel">Apps Script 網頁應用程式網址</label>
+    <input type="url" class="field" id="gas-url" placeholder="https://script.google.com/macros/s/…/exec" oninput="saveConfig()">
+    <p class="text-forest-300 text-xs mt-2">請貼上已部署的 GAS 網址，系統會自動儲存於瀏覽器中。</p>
+  </div>
+
+  <!-- 相機 / 照片 -->
+  <div class="card p-5 space-y-3">
+    <div class="font-display font-600 text-lg text-bark-100 tracking-wide">📷 照片</div>
+
+    <div id="camera-preview-wrap">
+      <video id="camera-video" autoplay playsinline></video>
+      <button class="btn btn-primary absolute bottom-3 left-1/2 -translate-x-1/2 px-8" id="capture-btn" onclick="capturePhoto()">拍攝</button>
+    </div>
+
+    <img id="photo-thumb" alt="已拍攝照片">
+
+    <div class="flex gap-3 flex-wrap">
+      <button class="btn btn-camera flex-1" id="camera-open-btn" onclick="openCamera()">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span>開啟相機</span>
+      </button>
+      <label class="btn btn-secondary flex-none cursor-pointer" style="padding:16px 20px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span class="text-sm">上傳圖片</span>
+        <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleFileUpload(event)">
+      </label>
+      <button class="btn btn-danger flex-none" id="clear-photo-btn" style="display:none; padding:16px 20px;" onclick="clearPhoto()">✕</button>
+    </div>
+  </div>
+
+  <!-- 資料輸入表單 -->
+  <div class="card p-5 space-y-4">
+    <div class="font-display font-600 text-lg text-bark-100 tracking-wide">📋 記錄詳情</div>
+
+    <div>
+      <label class="fieldlabel">重量（公斤）</label>
+      <input type="number" class="field" id="f-weight" placeholder="例：1250" inputmode="decimal" min="0" step="0.1">
+    </div>
+
+    <div>
+      <label class="fieldlabel">木材樹種</label>
+      <select class="field" id="f-species">
+        <option value="">— 選擇樹種 —</option>
+        <option>柚木（Tectona grandis）</option>
+        <option>桃花心木（Swietenia）</option>
+        <option>橡木（Quercus）</option>
+        <option>松木（Pinus）</option>
+        <option>梅蘭蒂（Shorea）</option>
+        <option>鐵木（Intsia bijuga）</option>
+        <option>胡桃木（Juglans）</option>
+        <option>烏木（Diospyros）</option>
+        <option>玫瑰木（Dalbergia）</option>
+        <option>竹材</option>
+        <option value="__other__">其他（請於備註說明）</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="fieldlabel">備註</label>
+      <textarea class="field" id="f-remarks" rows="3" placeholder="狀況、等級、說明…" style="resize:vertical;"></textarea>
+    </div>
+
+    <div id="dynamic-fields-container" class="space-y-3"></div>
+
+    <button class="btn btn-secondary w-full text-sm justify-center" onclick="addDynamicField()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      新增自訂欄位
+    </button>
+  </div>
+
+  <!-- 送出按鈕 -->
+  <button class="btn btn-primary w-full text-xl justify-center py-5" id="submit-btn" onclick="submitRecord()">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+    儲存記錄
+  </button>
+
+  <!-- 離線佇列 -->
+  <div class="card p-5 space-y-3" id="offline-queue-card" style="display:none;">
+    <div class="flex items-center justify-between">
+      <div class="font-display font-600 text-lg text-amber-400 tracking-wide">⏳ 離線佇列</div>
+      <span class="text-forest-300 text-sm" id="queue-summary">0 筆記錄</span>
+    </div>
+    <div id="queue-list" class="space-y-2 max-h-60 overflow-y-auto"></div>
+  </div>
+
+  <!-- 最近記錄 -->
+  <div class="card p-5 space-y-3">
+    <div class="flex items-center justify-between">
+      <div class="font-display font-600 text-lg text-bark-100 tracking-wide">🗂 最近記錄</div>
+      <button class="text-forest-400 text-xs tracking-widest uppercase hover:text-forest-300" onclick="clearLocalHistory()">清除</button>
+    </div>
+    <div id="history-list" class="space-y-2 max-h-80 overflow-y-auto">
+      <p class="text-forest-400 text-sm text-center py-4">尚無記錄。</p>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+const LS_CONFIG   = "timberapp_config";
+const LS_QUEUE    = "timberapp_offline_queue";
+const LS_HISTORY  = "timberapp_history";
+const MAX_HISTORY = 50;
+
+let photoDataUrl = null;
+let dynamicFieldCount = 0;
+let cameraStream = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadConfig();
+  renderHistory();
+  renderQueue();
+  checkOnlineStatus();
+  setInterval(checkOnlineStatus, 5000);
+  window.addEventListener("online",  checkOnlineStatus);
+  window.addEventListener("offline", checkOnlineStatus);
+});
+
+function loadConfig() {
+  const cfg = JSON.parse(localStorage.getItem(LS_CONFIG) || "{}");
+  if (cfg.gasUrl) document.getElementById("gas-url").value = cfg.gasUrl;
+}
+function saveConfig() {
+  const gasUrl = document.getElementById("gas-url").value.trim();
+  localStorage.setItem(LS_CONFIG, JSON.stringify({ gasUrl }));
+}
+function getGasUrl() {
+  return document.getElementById("gas-url").value.trim();
+}
+
+async function checkOnlineStatus() {
+  const gasUrl = getGasUrl();
+  let online = navigator.onLine;
+  if (online && gasUrl) {
+    try {
+      const res = await fetch(gasUrl + "?ping=1", { method: "GET", signal: AbortSignal.timeout(4000) });
+      online = res.ok;
+    } catch { online = false; }
+  }
+  const badge = document.getElementById("status-badge");
+  const dot   = document.getElementById("status-dot");
+  const label = document.getElementById("status-text");
+  if (online) {
+    badge.className = "badge badge-online";
+    dot.className   = "w-2 h-2 rounded-full bg-green-400 inline-block";
+    label.textContent = "線上";
+  } else {
+    badge.className = "badge badge-offline";
+    dot.className   = "w-2 h-2 rounded-full bg-red-400 inline-block";
+    label.textContent = "離線";
+  }
+  updateQueueUI();
+}
+
+async function openCamera() {
+  const wrap  = document.getElementById("camera-preview-wrap");
+  const video = document.getElementById("camera-video");
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+    video.srcObject = cameraStream;
+    wrap.classList.add("active");
+    document.getElementById("camera-open-btn").style.display = "none";
+  } catch (err) {
+    toast("無法開啟相機：" + err.message, true);
+  }
+}
+
+function capturePhoto() {
+  const video  = document.getElementById("camera-video");
+  const canvas = document.createElement("canvas");
+  canvas.width  = video.videoWidth  || 1280;
+  canvas.height = video.videoHeight || 720;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  photoDataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  showPhotoThumb(photoDataUrl);
+  stopCamera();
+}
+
+function stopCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  document.getElementById("camera-preview-wrap").classList.remove("active");
+  document.getElementById("camera-open-btn").style.display = "";
+}
+
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => { photoDataUrl = e.target.result; showPhotoThumb(photoDataUrl); };
+  reader.readAsDataURL(file);
+}
+
+function showPhotoThumb(src) {
+  const thumb = document.getElementById("photo-thumb");
+  thumb.src = src;
+  thumb.classList.add("show");
+  document.getElementById("clear-photo-btn").style.display = "";
+}
+
+function clearPhoto() {
+  photoDataUrl = null;
+  const thumb = document.getElementById("photo-thumb");
+  thumb.src = "";
+  thumb.classList.remove("show");
+  document.getElementById("clear-photo-btn").style.display = "none";
+}
+
+function addDynamicField() {
+  const container = document.getElementById("dynamic-fields-container");
+  const id = ++dynamicFieldCount;
+  const div = document.createElement("div");
+  div.id = "dyn-" + id;
+  div.className = "flex gap-2 items-end";
+  div.innerHTML = `
+    <div class="flex-1">
+      <input class="field text-sm" placeholder="欄位名稱（例：原木編號）" id="dyn-key-${id}" style="margin-bottom:6px;">
+      <input class="field" placeholder="內容" id="dyn-val-${id}">
+    </div>
+    <button class="btn btn-danger flex-none" style="padding:12px 16px;" onclick="removeDynamicField(${id})">✕</button>`;
+  container.appendChild(div);
+}
+
+function removeDynamicField(id) {
+  document.getElementById("dyn-" + id)?.remove();
+}
+
+function collectDynamicFields() {
+  const result = [];
+  document.querySelectorAll("[id^='dyn-key-']").forEach(keyEl => {
+    const id  = keyEl.id.replace("dyn-key-", "");
+    const val = document.getElementById("dyn-val-" + id)?.value.trim();
+    const key = keyEl.value.trim();
+    if (key || val) result.push({ key: key || "自訂", value: val || "" });
+  });
+  return result;
+}
+
+function buildRecord() {
+  return {
+    localId:       "local_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    timestamp:     new Date().toISOString(),
+    weight:        document.getElementById("f-weight").value.trim(),
+    species:       document.getElementById("f-species").value,
+    remarks:       document.getElementById("f-remarks").value.trim(),
+    dynamicFields: collectDynamicFields(),
+    imageBase64:   photoDataUrl || null,
+    imageName:     photoDataUrl ? "timber_" + Date.now() + ".jpg" : null,
+    action:        "submitRecord",
+  };
+}
+
+async function submitRecord() {
+  const gasUrl = getGasUrl();
+  const record = buildRecord();
+  if (!record.weight && !record.species) {
+    toast("請至少填入重量或樹種。", true); return;
+  }
+  const btn = document.getElementById("submit-btn");
+  btn.disabled = true;
+  btn.innerHTML = `<div class="spinner"></div> 儲存中…`;
+  const isOnline = navigator.onLine && gasUrl;
+  if (isOnline) {
+    try {
+      const res  = await fetch(gasUrl, { method: "POST", body: JSON.stringify(record) });
+      const json = await res.json();
+      if (json.success) {
+        record.synced = true;
+        record.imageUrl = json.imageUrl || "";
+        toast("✓ 記錄已儲存至 Google 試算表！");
+        addToHistory(record);
+        resetForm();
+      } else {
+        throw new Error(json.error || "伺服器錯誤");
+      }
+    } catch (err) {
+      toast("連線失敗，已儲存至離線佇列。", true);
+      record.synced = false;
+      saveToQueue(record);
+      addToHistory(record);
+      resetForm();
+    }
+  } else {
+    toast("📶 目前離線，記錄已加入佇列。");
+    record.synced = false;
+    saveToQueue(record);
+    addToHistory(record);
+    resetForm();
+  }
+  btn.disabled = false;
+  btn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 儲存記錄`;
+}
+
+function resetForm() {
+  document.getElementById("f-weight").value  = "";
+  document.getElementById("f-species").value = "";
+  document.getElementById("f-remarks").value = "";
+  document.getElementById("dynamic-fields-container").innerHTML = "";
+  dynamicFieldCount = 0;
+  clearPhoto();
+}
+
+function saveToQueue(record) {
+  const queue = getQueue();
+  queue.push(record);
+  localStorage.setItem(LS_QUEUE, JSON.stringify(queue));
+  updateQueueUI();
+}
+
+function getQueue() {
+  return JSON.parse(localStorage.getItem(LS_QUEUE) || "[]");
+}
+
+async function syncOfflineRecords() {
+  const gasUrl = getGasUrl();
+  if (!gasUrl) { toast("請先設定 GAS 網址。", true); return; }
+  const queue = getQueue();
+  if (!queue.length) { toast("佇列中沒有待同步的記錄。"); return; }
+  const btn = document.getElementById("sync-btn");
+  btn.disabled = true;
+  btn.innerHTML = `<div class="spinner" style="width:16px;height:16px;"></div> 同步中…`;
+  try {
+    const res  = await fetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "syncBatch", records: queue }) });
+    const json = await res.json();
+    if (json.success) {
+      const failed  = (json.results || []).filter(r => !r.success);
+      const passed  = queue.filter(q => !failed.find(f => f.id === q.localId));
+      const history = getHistory();
+      passed.forEach(rec => { const h = history.find(h => h.localId === rec.localId); if (h) h.synced = true; });
+      localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+      const remaining = queue.filter(q => failed.map(f => f.id).includes(q.localId));
+      localStorage.setItem(LS_QUEUE, JSON.stringify(remaining));
+      toast(`✓ 已同步 ${passed.length} 筆記錄。${failed.length ? failed.length + " 筆失敗。" : ""}`);
+      renderHistory();
+    } else {
+      throw new Error(json.error || "同步失敗");
+    }
+  } catch (err) {
+    toast("同步錯誤：" + err.message, true);
+  }
+  btn.disabled = false;
+  btn.innerHTML = `↑ 同步 <span class="queue-badge" id="queue-count">0</span>`;
+  updateQueueUI();
+}
+
+function updateQueueUI() {
+  const queue   = getQueue();
+  const count   = queue.length;
+  const card    = document.getElementById("offline-queue-card");
+  const badge   = document.getElementById("queue-count");
+  const summary = document.getElementById("queue-summary");
+  if (count > 0) {
+    card.style.display = "";
+    badge.style.display = "";
+    badge.textContent = count;
+    summary.textContent = count + " 筆記錄待同步";
+    renderQueueList(queue);
+  } else {
+    card.style.display = "none";
+    badge.style.display = "none";
+  }
+}
+
+function renderQueueList(queue) {
+  const el = document.getElementById("queue-list");
+  if (!queue.length) { el.innerHTML = ""; return; }
+  el.innerHTML = queue.map(r => `
+    <div class="history-row pending">
+      <div class="flex justify-between items-center">
+        <span class="font-display font-600 text-amber-400 text-sm">${r.species || "未知樹種"}</span>
+        <span class="text-amber-400 text-xs">⏳ 待同步</span>
+      </div>
+      <div class="text-bark-200 text-xs">${r.weight ? r.weight + " 公斤" : "無重量"} · ${fmtDate(r.timestamp)}</div>
+    </div>`).join("");
+}
+
+function renderQueue() { updateQueueUI(); }
+
+function getHistory() { return JSON.parse(localStorage.getItem(LS_HISTORY) || "[]"); }
+
+function addToHistory(record) {
+  const history = getHistory();
+  history.unshift(record);
+  if (history.length > MAX_HISTORY) history.splice(MAX_HISTORY);
+  localStorage.setItem(LS_HISTORY, JSON.stringify(history));
+  renderHistory();
+}
+
+function renderHistory() {
+  const history = getHistory();
+  const el      = document.getElementById("history-list");
+  if (!history.length) {
+    el.innerHTML = `<p class="text-forest-400 text-sm text-center py-4">尚無記錄。</p>`;
+    return;
+  }
+  el.innerHTML = history.map(r => `
+    <div class="history-row ${r.synced ? "" : "pending"}">
+      <div class="flex justify-between items-center">
+        <span class="font-display font-600 text-bark-100 text-base">${r.species || "未知樹種"}</span>
+        <span class="text-xs ${r.synced ? "text-forest-300" : "text-amber-400"}">${r.synced ? "✓ 已同步" : "⏳ 待同步"}</span>
+      </div>
+      <div class="text-bark-300 text-sm">${r.weight ? r.weight + " 公斤" : "—"} ${r.remarks ? "· " + r.remarks.slice(0, 40) : ""}</div>
+      <div class="text-forest-400 text-xs">${fmtDate(r.timestamp)} ${r.imageBase64 ? "📷" : ""}</div>
+    </div>`).join("");
+}
+
+function clearLocalHistory() {
+  if (!confirm("確定要清除本機記錄嗎？（已同步至 Google 試算表的資料不受影響。）")) return;
+  localStorage.removeItem(LS_HISTORY);
+  renderHistory();
+}
+
+function toast(msg, isError = false) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className   = "show" + (isError ? " error" : "");
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => { el.className = ""; }, 3500);
+}
+
+function fmtDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("zh-TW") + " " + d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
+  } catch { return iso; }
+}
+</script>
+</body>
+</html>

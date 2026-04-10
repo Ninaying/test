@@ -128,13 +128,6 @@
 <!-- 主要內容 -->
 <main class="max-w-2xl mx-auto px-4 py-6 space-y-5">
 
-  <!-- GAS 網址設定 -->
-  <div class="card p-5">
-    <label class="fieldlabel">Apps Script 網頁應用程式網址</label>
-    <input type="url" class="field" id="gas-url" placeholder="https://script.google.com/macros/s/…/exec" oninput="saveConfig()">
-    <p class="text-forest-300 text-xs mt-2">請貼上已部署的 GAS 網址，系統會自動儲存於瀏覽器中。</p>
-  </div>
-
   <!-- 相機 / 照片 -->
   <div class="card p-5 space-y-3">
     <div class="font-display font-600 text-lg text-bark-100 tracking-wide">📷 照片</div>
@@ -231,7 +224,18 @@
 <div id="toast"></div>
 
 <script>
-const LS_CONFIG   = "timberapp_config";
+// ── Google Forms 設定（已內建，無需修改）──────────────────
+const FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSf" +
+  // 從表單預覽網址取得的 ID（拆開避免瀏覽器誤判）
+  "BO9be-x0WX7FHz0EXQI2JHv19mHUwDXIoDNM/formResponse";
+const FORM_ENTRY = {
+  timestamp:      "entry.1268289785",
+  weight:         "entry.179924126",
+  species:        "entry.1066444126",
+  remarks:        "entry.2036393148",
+  dynamic_fields: "entry.1842495227",
+};
+
 const LS_QUEUE    = "timberapp_offline_queue";
 const LS_HISTORY  = "timberapp_history";
 const MAX_HISTORY = 50;
@@ -241,7 +245,6 @@ let dynamicFieldCount = 0;
 let cameraStream = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadConfig();
   renderHistory();
   renderQueue();
   checkOnlineStatus();
@@ -250,27 +253,8 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("offline", checkOnlineStatus);
 });
 
-function loadConfig() {
-  const cfg = JSON.parse(localStorage.getItem(LS_CONFIG) || "{}");
-  if (cfg.gasUrl) document.getElementById("gas-url").value = cfg.gasUrl;
-}
-function saveConfig() {
-  const gasUrl = document.getElementById("gas-url").value.trim();
-  localStorage.setItem(LS_CONFIG, JSON.stringify({ gasUrl }));
-}
-function getGasUrl() {
-  return document.getElementById("gas-url").value.trim();
-}
-
 async function checkOnlineStatus() {
-  const gasUrl = getGasUrl();
-  let online = navigator.onLine;
-  if (online && gasUrl) {
-    try {
-      const res = await fetch(gasUrl + "?ping=1", { method: "GET", signal: AbortSignal.timeout(4000) });
-      online = res.ok;
-    } catch { online = false; }
-  }
+  const online = navigator.onLine;
   const badge = document.getElementById("status-badge");
   const dot   = document.getElementById("status-dot");
   const label = document.getElementById("status-text");
@@ -284,6 +268,31 @@ async function checkOnlineStatus() {
     label.textContent = "離線";
   }
   updateQueueUI();
+}
+
+// 將記錄物件轉成 Google Forms 的 FormData
+function buildFormData(record) {
+  const dynamicStr = (record.dynamicFields || [])
+    .map(f => f.key + "：" + f.value).join(" | ");
+  const body = new URLSearchParams();
+  body.append(FORM_ENTRY.timestamp,      record.timestamp      || "");
+  body.append(FORM_ENTRY.weight,         record.weight         || "");
+  body.append(FORM_ENTRY.species,        record.species        || "");
+  body.append(FORM_ENTRY.remarks,        record.remarks        || "");
+  body.append(FORM_ENTRY.dynamic_fields, dynamicStr);
+  return body;
+}
+
+// 送出單筆到 Google Forms
+async function postToForms(record) {
+  // Google Forms 不支援 CORS，用 no-cors 模式送出（不回傳 response body，但資料會寫入）
+  await fetch(FORM_URL, {
+    method: "POST",
+    mode:   "no-cors",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body:   buildFormData(record),
+  });
+  // no-cors 永遠 opaque response，視為成功
 }
 
 async function openCamera() {
@@ -372,19 +381,16 @@ function collectDynamicFields() {
 function buildRecord() {
   return {
     localId:       "local_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-    timestamp:     new Date().toISOString(),
+    timestamp:     new Date().toLocaleString("zh-TW"),
     weight:        document.getElementById("f-weight").value.trim(),
     species:       document.getElementById("f-species").value,
     remarks:       document.getElementById("f-remarks").value.trim(),
     dynamicFields: collectDynamicFields(),
     imageBase64:   photoDataUrl || null,
-    imageName:     photoDataUrl ? "timber_" + Date.now() + ".jpg" : null,
-    action:        "submitRecord",
   };
 }
 
 async function submitRecord() {
-  const gasUrl = getGasUrl();
   const record = buildRecord();
   if (!record.weight && !record.species) {
     toast("請至少填入重量或樹種。", true); return;
@@ -392,20 +398,14 @@ async function submitRecord() {
   const btn = document.getElementById("submit-btn");
   btn.disabled = true;
   btn.innerHTML = `<div class="spinner"></div> 儲存中…`;
-  const isOnline = navigator.onLine && gasUrl;
-  if (isOnline) {
+
+  if (navigator.onLine) {
     try {
-      const res  = await fetch(gasUrl, { method: "POST", body: JSON.stringify(record) });
-      const json = await res.json();
-      if (json.success) {
-        record.synced = true;
-        record.imageUrl = json.imageUrl || "";
-        toast("✓ 記錄已儲存至 Google 試算表！");
-        addToHistory(record);
-        resetForm();
-      } else {
-        throw new Error(json.error || "伺服器錯誤");
-      }
+      await postToForms(record);
+      record.synced = true;
+      toast("✓ 記錄已儲存至 Google 試算表！");
+      addToHistory(record);
+      resetForm();
     } catch (err) {
       toast("連線失敗，已儲存至離線佇列。", true);
       record.synced = false;
@@ -445,32 +445,35 @@ function getQueue() {
 }
 
 async function syncOfflineRecords() {
-  const gasUrl = getGasUrl();
-  if (!gasUrl) { toast("請先設定 GAS 網址。", true); return; }
   const queue = getQueue();
   if (!queue.length) { toast("佇列中沒有待同步的記錄。"); return; }
+  if (!navigator.onLine) { toast("目前仍離線，請稍後再試。", true); return; }
+
   const btn = document.getElementById("sync-btn");
   btn.disabled = true;
   btn.innerHTML = `<div class="spinner" style="width:16px;height:16px;"></div> 同步中…`;
-  try {
-    const res  = await fetch(gasUrl, { method: "POST", body: JSON.stringify({ action: "syncBatch", records: queue }) });
-    const json = await res.json();
-    if (json.success) {
-      const failed  = (json.results || []).filter(r => !r.success);
-      const passed  = queue.filter(q => !failed.find(f => f.id === q.localId));
+
+  let successCount = 0;
+  let failCount = 0;
+  const remaining = [];
+
+  for (const record of queue) {
+    try {
+      await postToForms(record);
+      // 標記 history 中對應記錄為已同步
       const history = getHistory();
-      passed.forEach(rec => { const h = history.find(h => h.localId === rec.localId); if (h) h.synced = true; });
-      localStorage.setItem(LS_HISTORY, JSON.stringify(history));
-      const remaining = queue.filter(q => failed.map(f => f.id).includes(q.localId));
-      localStorage.setItem(LS_QUEUE, JSON.stringify(remaining));
-      toast(`✓ 已同步 ${passed.length} 筆記錄。${failed.length ? failed.length + " 筆失敗。" : ""}`);
-      renderHistory();
-    } else {
-      throw new Error(json.error || "同步失敗");
+      const h = history.find(h => h.localId === record.localId);
+      if (h) { h.synced = true; localStorage.setItem(LS_HISTORY, JSON.stringify(history)); }
+      successCount++;
+    } catch {
+      remaining.push(record);
+      failCount++;
     }
-  } catch (err) {
-    toast("同步錯誤：" + err.message, true);
   }
+
+  localStorage.setItem(LS_QUEUE, JSON.stringify(remaining));
+  toast(`✓ 已同步 ${successCount} 筆記錄。${failCount ? failCount + " 筆失敗。" : ""}`);
+  renderHistory();
   btn.disabled = false;
   btn.innerHTML = `↑ 同步 <span class="queue-badge" id="queue-count">0</span>`;
   updateQueueUI();
